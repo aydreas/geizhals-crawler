@@ -6,35 +6,10 @@ const https = require("https");
 const fs = require("fs");
 const { parse } = require("node-html-parser");
 
-const config = JSON.parse(fs.readFileSync("lists.json", { encoding: "utf8" }));
+const config = JSON.parse(fs.readFileSync("config.json", { encoding: "utf8" }));
+let transporter;
 
-const callback = (resp, mode = 'price', price = 0) => {
-	let data = '';
-
-	resp.on('data', (chunk) => {
-		data += chunk;
-	});
-
-	resp.on('end', () => {
-		const products = resolve(data);
-		switch (mode) {
-			case 'price':
-				products.forEach(x => {
-					if (x.price <= price)
-						sendMail(x);
-				});
-				break;
-			case 'unit':
-				products.forEach(x => {
-					if (x.pricePerUnit <= price)
-						sendMail(x);
-				});
-				break;
-		}
-	});
-};
-
-config.forEach(x => {
+config.searches.forEach(x => {
 	if (!x.url)
 		return;
 
@@ -43,20 +18,50 @@ config.forEach(x => {
 
 	if (x.url.startsWith('https')) {
 		if (x.targetPrice)
-			https.get(url_price, x => callback(x, 'price', x.targetPrice))
+			https.get(url_price, y => httpCallback(y, 'price', x.targetPrice))
 				.on('error', err => console.error(err.message));
 		if (x.targetUnitPrice)
-			https.get(url_unit, x => callback(x, 'unit', x.targetUnitPrice))
+			https.get(url_unit, y => httpCallback(y, 'unit', x.targetUnitPrice))
 				.on('error', err => console.error(err.message));
 	} else {
 		if (x.targetPrice)
-			http.get(url_price, x => callback(x, 'price', x.targetPrice))
+			http.get(url_price, y => httpCallback(y, 'price', x.targetPrice))
 				.on('error', err => console.error(err.message));
 		if (x.targetUnitPrice)
-			http.get(url_unit, x => callback(x, 'unit', x.targetUnitPrice))
+			http.get(url_unit, y => httpCallback(y, 'unit', x.targetUnitPrice))
 				.on('error', err => console.error(err.message));
 	}
 });
+
+function httpCallback(resp, mode = 'price', price = 0) {
+	let data = '';
+
+	resp.on('data', (chunk) => {
+		data += chunk;
+	});
+
+	resp.on('end', async () => {
+		const products = resolve(data);
+		let promises = [];
+
+		switch (mode) {
+			case 'price':
+				products.forEach(x => {
+					if (x.price <= price)
+						promises.push(sendMail(x));
+				});
+				break;
+			case 'unit':
+				products.forEach(x => {
+					if (x.pricePerUnit <= price)
+						promises.push(sendMail(x));
+				});
+				break;
+		}
+
+		await Promise.all(promises);
+	});
+}
 
 function resolve(html) {
 	let products = [];
@@ -73,6 +78,28 @@ function resolve(html) {
 	return products;
 }
 
-function sendMail(product) {
+async function sendMail(product) {
+	if (!transporter) {
+		transporter = nodemailer.createTransport({
+			host: config.mail.host || '',
+			port: config.mail.port || 465,
+			secure: config.mail.secure || false,
+			auth: {
+				user: config.mail.user || '',
+				pass: config.mail.pass || ''
+			}
+		});
+	}
 
+	console.log(`Sending mail(s) about product: '${product.name}' to [${config.recipients.join(', ')}]`);
+	await transporter.sendMail({
+		from: '"Geizhals Crawler" <geizhals.crawler@gmail.com>',
+		to: config.recipients.join(','),
+		subject: 'New Deal found!',
+		html: fs.readFileSync('mail.html', {encoding: 'utf8'})
+			.replace('%%link%%', product.link)
+			.replace('%%name%%', product.name)
+			.replace('%%price%%', product.price)
+			.replace('%%pricePerUnit%%', product.pricePerUnit)
+	});
 }
