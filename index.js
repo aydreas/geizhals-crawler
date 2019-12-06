@@ -8,30 +8,40 @@ const { parse } = require("node-html-parser");
 
 const config = JSON.parse(fs.readFileSync("config.json", { encoding: "utf8" }));
 let transporter;
+let prev = {
+	price: [],
+	unit: []
+};
 
-config.searches.forEach(x => {
-	if (!x.url)
-		return;
+setInterval(run, config.interval);
+run();
 
-	const url_price = x.url.replace(/&sort=[^&=#]|(#)|$/, "&sort=p$1");
-	const url_unit = x.url.replace(/&sort=[^&=#]|(#)|$/, "&sort=r$1");
+function run() {
+	console.log('Run started.');
+	config.searches.forEach(x => {
+		if (!x.url)
+			return;
 
-	if (x.url.startsWith('https')) {
-		if (x.targetPrice)
-			https.get(url_price, y => httpCallback(y, 'price', x.targetPrice))
-				.on('error', err => console.error(err.message));
-		if (x.targetUnitPrice)
-			https.get(url_unit, y => httpCallback(y, 'unit', x.targetUnitPrice))
-				.on('error', err => console.error(err.message));
-	} else {
-		if (x.targetPrice)
-			http.get(url_price, y => httpCallback(y, 'price', x.targetPrice))
-				.on('error', err => console.error(err.message));
-		if (x.targetUnitPrice)
-			http.get(url_unit, y => httpCallback(y, 'unit', x.targetUnitPrice))
-				.on('error', err => console.error(err.message));
-	}
-});
+		const url_price = x.url.replace(/&sort=[^&=#]|(#)|$/, "&sort=p$1");
+		const url_unit = x.url.replace(/&sort=[^&=#]|(#)|$/, "&sort=r$1");
+
+		if (x.url.startsWith('https')) {
+			if (x.targetPrice)
+				https.get(url_price, y => httpCallback(y, 'price', x.targetPrice))
+					.on('error', err => console.error(err.message));
+			if (x.targetUnitPrice)
+				https.get(url_unit, y => httpCallback(y, 'unit', x.targetUnitPrice))
+					.on('error', err => console.error(err.message));
+		} else {
+			if (x.targetPrice)
+				http.get(url_price, y => httpCallback(y, 'price', x.targetPrice))
+					.on('error', err => console.error(err.message));
+			if (x.targetUnitPrice)
+				http.get(url_unit, y => httpCallback(y, 'unit', x.targetUnitPrice))
+					.on('error', err => console.error(err.message));
+		}
+	});
+}
 
 function httpCallback(resp, mode = 'price', price = 0) {
 	let data = '';
@@ -43,19 +53,28 @@ function httpCallback(resp, mode = 'price', price = 0) {
 	resp.on('end', async () => {
 		const products = resolve(data);
 		let promises = [];
+		let prevTemp = [];
 
 		switch (mode) {
 			case 'price':
 				products.forEach(x => {
-					if (x.price <= price)
-						promises.push(sendMail(x));
+					if (x.price <= price) {
+						if (!prev.price.find(y => y.link === x.link))
+							promises.push(sendMail(x));
+						prevTemp.push(x);
+					}
 				});
+				prev.price = prevTemp;
 				break;
 			case 'unit':
 				products.forEach(x => {
-					if (x.pricePerUnit <= price)
-						promises.push(sendMail(x));
+					if (x.pricePerUnit <= price) {
+						if (!prev.unit.find(y => y.link === x.link))
+							promises.push(sendMail(x));
+						prevTemp.push(x);
+					}
 				});
+				prev.unit = prevTemp;
 				break;
 		}
 
