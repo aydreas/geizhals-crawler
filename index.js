@@ -8,16 +8,13 @@ const { parse } = require("node-html-parser");
 
 const config = JSON.parse(fs.readFileSync("config.json", { encoding: "utf8" }));
 let transporter;
-let prev = {
-	price: [],
-	unit: []
-};
 
-setInterval(run, config.interval);
+let cache = fs.existsSync('cache.json') ?
+	JSON.parse(fs.readFileSync('cache.json', {encoding: 'utf8'})) : {};
+
 run();
 
 function run() {
-	console.log('Run started.');
 	config.searches.forEach(x => {
 		if (!x.url)
 			return;
@@ -27,23 +24,23 @@ function run() {
 
 		if (x.url.startsWith('https')) {
 			if (x.targetPrice)
-				https.get(url_price, y => httpCallback(y, 'price', x.targetPrice))
+				https.get(url_price, y => httpCallback(y, 'price', x.targetPrice, x.name))
 					.on('error', err => console.error(err.message));
 			if (x.targetUnitPrice)
-				https.get(url_unit, y => httpCallback(y, 'unit', x.targetUnitPrice))
+				https.get(url_unit, y => httpCallback(y, 'unit', x.targetUnitPrice, x.name))
 					.on('error', err => console.error(err.message));
 		} else {
 			if (x.targetPrice)
-				http.get(url_price, y => httpCallback(y, 'price', x.targetPrice))
+				http.get(url_price, y => httpCallback(y, 'price', x.targetPrice, x.name))
 					.on('error', err => console.error(err.message));
 			if (x.targetUnitPrice)
-				http.get(url_unit, y => httpCallback(y, 'unit', x.targetUnitPrice))
+				http.get(url_unit, y => httpCallback(y, 'unit', x.targetUnitPrice, x.name))
 					.on('error', err => console.error(err.message));
 		}
 	});
 }
 
-function httpCallback(resp, mode = 'price', price = 0) {
+function httpCallback(resp, mode = 'price', price = 0, name = '') {
 	let data = '';
 
 	resp.on('data', (chunk) => {
@@ -53,31 +50,36 @@ function httpCallback(resp, mode = 'price', price = 0) {
 	resp.on('end', async () => {
 		const products = resolve(data);
 		let promises = [];
-		let prevTemp = [];
+
+		if (!cache[name])
+			cache[name] = {
+				price: [],
+				unit: []
+			};
+
 
 		switch (mode) {
 			case 'price':
 				products.forEach(x => {
 					if (x.price <= price) {
-						if (!prev.price.find(y => y.link === x.link))
-							promises.push(sendMail(x));
-						prevTemp.push(x);
+						if (!cache[name].price.find(y => y.link === x.link))
+							promises.push(sendMail(x, name));
 					}
 				});
-				prev.price = prevTemp;
+				cache[name].price = products;
 				break;
 			case 'unit':
 				products.forEach(x => {
 					if (x.pricePerUnit <= price) {
-						if (!prev.unit.find(y => y.link === x.link))
-							promises.push(sendMail(x));
-						prevTemp.push(x);
+						if (!cache[name].unit.find(y => y.link === x.link))
+							promises.push(sendMail(x, name));
 					}
 				});
-				prev.unit = prevTemp;
+				cache[name].unit = products;
 				break;
 		}
 
+		fs.writeFileSync('cache.json', JSON.stringify(cache));
 		await Promise.all(promises);
 	});
 }
@@ -97,7 +99,7 @@ function resolve(html) {
 	return products;
 }
 
-async function sendMail(product) {
+async function sendMail(product, name) {
 	if (!transporter) {
 		transporter = nodemailer.createTransport({
 			host: config.mail.host || '',
@@ -116,6 +118,7 @@ async function sendMail(product) {
 		to: config.recipients.join(','),
 		subject: 'New Deal found!',
 		html: fs.readFileSync('mail.html', {encoding: 'utf8'})
+			.replace('%%search%%', name)
 			.replace('%%link%%', product.link)
 			.replace('%%name%%', product.name)
 			.replace('%%price%%', product.price)
