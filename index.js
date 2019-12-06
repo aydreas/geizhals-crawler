@@ -6,6 +6,17 @@ const https = require("https");
 const fs = require("fs");
 const { parse } = require("node-html-parser");
 
+process.stdout._orig_write = process.stdout.write;
+process.stdout.write = (data) => {
+	fs.appendFile('logs', `[${new Date().toISOString()}][INFO] ${data.substring(0, data.length - 1).replace('\n', '\n\t- ')}${data.endsWith('\n') ? '\n' : data.charAt(data.length - 1) + '\n'}`, () => {});
+	process.stdout._orig_write(data);
+};
+process.stderr._orig_write = process.stderr.write;
+process.stderr.write = (data) => {
+	fs.appendFile('logs', `[${new Date().toISOString()}][ERR] ${data.substring(0, data.length - 1).replace('\n', '\n\t- ')}${data.endsWith('\n') ? '\n' : data.charAt(data.length - 1) + '\n'}`, () => {});
+	process.stderr._orig_write(data);
+};
+
 const config = JSON.parse(fs.readFileSync("config.json", { encoding: "utf8" }));
 let transporter;
 
