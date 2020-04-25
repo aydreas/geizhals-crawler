@@ -1,108 +1,162 @@
 "use strict";
 
-const nodemailer = require("nodemailer");
-const http = require("http");
-const https = require("https");
-const fs = require("fs");
-const { parse } = require("node-html-parser");
+const configPath = 'config.json';
+const logPath = 'logs';
+const cachePath = 'cache.json';
+
+const nodemailer = require('nodemailer');
+const http = require('http');
+const https = require('https');
+const fs = require('fs');
+const URL = require('url').URL;
+const { parse } = require('node-html-parser');
 
 process.stdout._orig_write = process.stdout.write;
 process.stdout.write = (data) => {
-	fs.appendFile('logs', `[${new Date().toISOString()}][INFO] ${data.substring(0, data.length - 1).replace('\n', '\n\t- ')}${data.endsWith('\n') ? '\n' : data.charAt(data.length - 1) + '\n'}`, () => {});
+	fs.appendFile(logPath, `[${new Date().toISOString()}][INFO] ${data.substring(0, data.length - 1).replace('\n', '\n\t- ')}${data.endsWith('\n') ? '\n' : data.charAt(data.length - 1) + '\n'}`, () => {});
 	process.stdout._orig_write(data);
 };
 process.stderr._orig_write = process.stderr.write;
 process.stderr.write = (data) => {
-	fs.appendFile('logs', `[${new Date().toISOString()}][ERR] ${data.substring(0, data.length - 1).replace('\n', '\n\t- ')}${data.endsWith('\n') ? '\n' : data.charAt(data.length - 1) + '\n'}`, () => {});
+	fs.appendFile(logPath, `[${new Date().toISOString()}][ERR] ${data.substring(0, data.length - 1).replace('\n', '\n\t- ')}${data.endsWith('\n') ? '\n' : data.charAt(data.length - 1) + '\n'}`, () => {});
 	process.stderr._orig_write(data);
 };
 
-const config = JSON.parse(fs.readFileSync("config.json", { encoding: "utf8" }));
-let transporter;
+const httpReq = (options = {}, ssl = false) => new Promise((resolve, reject) => {
+	if (options.body) {
+		if (!options.headers)
+			options.headers = {};
+		options.headers['Content-Length'] = options.body.length;
+	}
 
-let cache = fs.existsSync('cache.json') ?
-	JSON.parse(fs.readFileSync('cache.json', {encoding: 'utf8'})) : {};
+	let req = (ssl ? https : http).request(options, (res) => {
+		if (res.statusCode < 200 || res.statusCode >= 300) {
+			reject(new Error(JSON.stringify({
+				request: options,
+				statusCode: res.statusCode
+			})));
+		}
 
-run();
+		let response = res;
+		let body = [];
 
-function run() {
-	config.searches.forEach(x => {
+		res.on('data', (chunk) => {
+			body.push(chunk);
+		});
+		res.on('end', () => {
+			response.body = Buffer.concat(body).toString();
+			resolve(response);
+		});
+	});
+
+	req.on('error', (err) => {
+		reject(err);
+	});
+	req.on('timeout', () => {
+		req.abort();
+		reject(new Error(JSON.stringify({
+			request: options,
+			statusCode: '<timed out>'
+		})));
+	});
+
+	if (options.body)
+		req.write(options.body);
+	req.end();
+});
+
+const config = JSON.parse(fs.readFileSync(configPath, { encoding: 'utf8' }));
+let cache = fs.existsSync(cachePath) ?
+	JSON.parse(fs.readFileSync(cachePath, {encoding: 'utf8'})) : {};
+const transporter = nodemailer.createTransport({
+	host: config.mail.host || '',
+	port: config.mail.port || 465,
+	secure: config.mail.secure || false,
+	auth: {
+		user: config.mail.user || '',
+		pass: config.mail.pass || ''
+	}
+});
+
+async function run() {
+	let promises = [];
+	for (const x of config.searches) {
 		if (!x.url)
-			return;
+			continue;
 
-		const url_price = x.url.replace(/&sort=[^&=#]|(#)|$/, "&sort=p$1");
-		const url_unit = x.url.replace(/&sort=[^&=#]|(#)|$/, "&sort=r$1");
-
-		if (x.url.startsWith('https')) {
-			if (x.targetPrice)
-				https.get(url_price, y => httpCallback(y, 'price', x.targetPrice, x.name))
-					.on('error', err => console.error(err.message));
-			if (x.targetUnitPrice)
-				https.get(url_unit, y => httpCallback(y, 'unit', x.targetUnitPrice, x.name))
-					.on('error', err => console.error(err.message));
-		} else {
-			if (x.targetPrice)
-				http.get(url_price, y => httpCallback(y, 'price', x.targetPrice, x.name))
-					.on('error', err => console.error(err.message));
-			if (x.targetUnitPrice)
-				http.get(url_unit, y => httpCallback(y, 'unit', x.targetUnitPrice, x.name))
-					.on('error', err => console.error(err.message));
-		}
-	});
-}
-
-function httpCallback(resp, mode = 'price', price = 0, name = '') {
-	let data = '';
-
-	resp.on('data', (chunk) => {
-		data += chunk;
-	});
-
-	resp.on('end', async () => {
-		const products = resolve(data);
-		let promises = [];
-
-		if (!cache[name])
-			cache[name] = {
-				price: [],
-				unit: []
-			};
-
-
-		switch (mode) {
-			case 'price':
-				products.forEach(x => {
-					if (x.price <= price) {
-						if (!cache[name].price.find(y => y.link === x.link))
-							promises.push(sendMail(x, name));
-					}
-				});
-				cache[name].price = products;
-				break;
-			case 'unit':
-				products.forEach(x => {
-					if (x.pricePerUnit <= price) {
-						if (!cache[name].unit.find(y => y.link === x.link))
-							promises.push(sendMail(x, name));
-					}
-				});
-				cache[name].unit = products;
-				break;
+		const url = new URL(x.url);
+		if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+			console.error(`URL: '${x.url}' has no valid protocol.`);
+			continue;
 		}
 
-		fs.writeFileSync('cache.json', JSON.stringify(cache));
-		await Promise.all(promises);
-	});
+		if (x.targetPrice) {
+			const resp = await httpReq({
+				hostname: url.hostname,
+				port: url.port,
+				method: 'GET',
+				path: url.pathname + url.search.replace(/&sort=[^&=#]|(#)|$/, "&sort=p$1") + url.hash,
+				timeout: 10000
+			}, url.protocol === 'https:')
+				.catch(err => console.error(err));
+
+			const products = resolveHTML(resp.body);
+
+			if (!cache[x.name]) {
+				cache[x.name] = {
+					price: [],
+					unit: []
+				};
+			}
+
+			products.forEach(y => {
+				if (y.price <= x.targetPrice) {
+					if (!cache[x.name].price.find(y => y.link === x.link))
+						promises.push(sendMail(y, x.name));
+				}
+			});
+			cache[x.name].price = products;
+		}
+		if (x.targetUnitPrice) {
+			const resp = await httpReq({
+				hostname: url.hostname,
+				port: url.port,
+				method: 'GET',
+				path: url.pathname + url.search.replace(/&sort=[^&=#]|(#)|$/, "&sort=r$1") + url.hash,
+				timeout: 10000
+			}, url.protocol === 'https:')
+				.catch(err => console.error(err));
+
+			const products = resolveHTML(resp.body);
+
+			if (!cache[x.name]) {
+				cache[x.name] = {
+					price: [],
+					unit: []
+				};
+			}
+
+			products.forEach(y => {
+				if (y.pricePerUnit <= x.targetUnitPrice) {
+					if (!cache[x.name].unit.find(y => y.link === x.link))
+						promises.push(sendMail(y, x.name));
+				}
+			});
+			cache[x.name].unit = products;
+		}
+	}
+	fs.writeFileSync(cachePath, JSON.stringify(cache));
+	await Promise.all(promises);
 }
 
-function resolve(html) {
+function resolveHTML(html) {
 	let products = [];
 
 	parse(html).querySelectorAll('.filtercategory__productlist .productlist__product').forEach(x => {
 		const name = x.querySelector('.productlist__link span').innerHTML.trim();
 		const link = 'https://geizhals.at/' + x.querySelector('.productlist__link').attributes.href.trim();
-		const price = Number(x.querySelector('.productlist__price .gh_price .gh_price').innerHTML.replace(/[^0-9,.]/, '').replace(',', '.').trim());
-		const pricePerUnit = Number(x.querySelector('.productlist__price .gh_pricePerUnit span').innerHTML.replace(/[^0-9,.]/, '').replace(',', '.').trim());
+		const price = Number(x.querySelector('.productlist__price .gh_price .gh_price').innerHTML.replace(/[^0-9,.]/g, '').replace(',', '.').trim());
+		const pricePerUnit = Number(x.querySelector('.productlist__price .gh_pricePerUnit span').innerHTML.replace(/[^0-9,.]/g, '').replace(',', '.').trim());
 
 		products.push({name, link, price, pricePerUnit});
 	});
@@ -111,18 +165,6 @@ function resolve(html) {
 }
 
 async function sendMail(product, name) {
-	if (!transporter) {
-		transporter = nodemailer.createTransport({
-			host: config.mail.host || '',
-			port: config.mail.port || 465,
-			secure: config.mail.secure || false,
-			auth: {
-				user: config.mail.user || '',
-				pass: config.mail.pass || ''
-			}
-		});
-	}
-
 	console.log(`Sending mail(s) about product: '${product.name}' to [${config.recipients.join(', ')}]`);
 	await transporter.sendMail({
 		from: '"Geizhals Crawler" <geizhals.crawler@gmail.com>',
@@ -136,3 +178,5 @@ async function sendMail(product, name) {
 			.replace('%%pricePerUnit%%', product.pricePerUnit)
 	});
 }
+
+run().catch(x => console.error(x));
