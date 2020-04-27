@@ -110,10 +110,8 @@ async function run() {
 			}
 
 			products.forEach(y => {
-				if (y.price <= x.targetPrice) {
-					if (!cache[x.name].price.find(y => y.link === x.link))
-						promises.push(sendMail(y, x.name));
-				}
+				if (y.price <= x.targetPrice && !cache[x.name].price.find(z => z.link === y.link))
+					promises.push(sendMail(y, x.name));
 			});
 			cache[x.name].price = products;
 		}
@@ -137,10 +135,8 @@ async function run() {
 			}
 
 			products.forEach(y => {
-				if (y.pricePerUnit <= x.targetUnitPrice) {
-					if (!cache[x.name].unit.find(y => y.link === x.link))
-						promises.push(sendMail(y, x.name));
-				}
+				if (y.pricePerUnit <= x.targetUnitPrice && !cache[x.name].unit.find(z => z.link === y.link))
+					promises.push(sendMail(y, x.name));
 			});
 			cache[x.name].unit = products;
 		}
