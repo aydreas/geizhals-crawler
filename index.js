@@ -151,7 +151,7 @@ function resolveHTML(html) {
 	parse(html).querySelectorAll('.filtercategory__productlist .productlist__product').forEach(x => {
 		const name = x.querySelector('.productlist__link span').innerHTML.trim();
 		const link = 'https://geizhals.at/' + x.querySelector('.productlist__link').attributes.href.trim();
-		const price = Number(x.querySelector('.productlist__price .gh_price .gh_price').innerHTML.replace(/[^0-9,.]/g, '').replace(',', '.').trim());
+		const price = Number(x.querySelector('.productlist__price .gh_price span').innerHTML.replace(/[^0-9,.]/g, '').replace(',', '.').trim());
 		const pricePerUnit = Number(x.querySelector('.productlist__price .gh_pricePerUnit span').innerHTML.replace(/[^0-9,.]/g, '').replace(',', '.').trim());
 
 		products.push({name, link, price, pricePerUnit});
