@@ -11,16 +11,20 @@ const fs = require('fs');
 const URL = require('url').URL;
 const { parse } = require('node-html-parser');
 
-process.stdout._orig_write = process.stdout.write;
-process.stdout.write = (data) => {
-	fs.appendFile(logPath, `[${new Date().toISOString()}][INFO] ${data.substring(0, data.length - 1).replace('\n', '\n\t- ')}${data.endsWith('\n') ? '\n' : data.charAt(data.length - 1) + '\n'}`, () => {});
-	process.stdout._orig_write(data);
-};
-process.stderr._orig_write = process.stderr.write;
-process.stderr.write = (data) => {
-	fs.appendFile(logPath, `[${new Date().toISOString()}][ERR] ${data.substring(0, data.length - 1).replace('\n', '\n\t- ')}${data.endsWith('\n') ? '\n' : data.charAt(data.length - 1) + '\n'}`, () => {});
-	process.stderr._orig_write(data);
-};
+if (logPath) {
+	process.stdout._orig_write = process.stdout.write;
+	process.stdout.write = (data) => {
+		fs.appendFile(logPath, `[${new Date().toISOString()}][INFO] ${data.substring(0, data.length - 1).replace('\n', '\n\t- ')}${data.endsWith('\n') ? '\n' : data.charAt(data.length - 1) + '\n'}`, () => {
+		});
+		process.stdout._orig_write(data);
+	};
+	process.stderr._orig_write = process.stderr.write;
+	process.stderr.write = (data) => {
+		fs.appendFile(logPath, `[${new Date().toISOString()}][ERR] ${data.substring(0, data.length - 1).replace('\n', '\n\t- ')}${data.endsWith('\n') ? '\n' : data.charAt(data.length - 1) + '\n'}`, () => {
+		});
+		process.stderr._orig_write(data);
+	};
+}
 
 const httpReq = (options = {}, ssl = false) => new Promise((resolve, reject) => {
 	if (options.body) {
@@ -66,8 +70,10 @@ const httpReq = (options = {}, ssl = false) => new Promise((resolve, reject) => 
 });
 
 const config = JSON.parse(fs.readFileSync(configPath, { encoding: 'utf8' }));
+
 let cache = fs.existsSync(cachePath) ?
 	JSON.parse(fs.readFileSync(cachePath, {encoding: 'utf8'})) : {};
+
 const transporter = nodemailer.createTransport({
 	host: config.mail.host || '',
 	port: config.mail.port || 465,
@@ -110,7 +116,7 @@ async function run() {
 			}
 
 			products.forEach(y => {
-				if (y.price <= x.targetPrice && !cache[x.name].price.find(z => z.link === y.link))
+				if (y.price <= x.targetPrice && !cache[x.name].price.find(z => z.link === y.link && z.price === y.price))
 					promises.push(sendMail(y, x.name));
 			});
 			cache[x.name].price = products;
@@ -135,7 +141,7 @@ async function run() {
 			}
 
 			products.forEach(y => {
-				if (y.pricePerUnit <= x.targetUnitPrice && !cache[x.name].unit.find(z => z.link === y.link))
+				if (y.pricePerUnit <= x.targetUnitPrice && !cache[x.name].unit.find(z => z.link === y.link && z.pricePerUnit === y.pricePerUnit))
 					promises.push(sendMail(y, x.name));
 			});
 			cache[x.name].unit = products;
