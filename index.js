@@ -4,11 +4,12 @@ const configPath = 'config.json';
 const logPath = 'logs';
 const cachePath = 'cache.json';
 
-const nodemailer = require('nodemailer');
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const URL = require('url').URL;
+const nodemailer = require('nodemailer');
+const { Telegram } = require('telegraf');
 const { parse } = require('node-html-parser');
 
 if (logPath) {
@@ -69,10 +70,21 @@ const httpReq = (options = {}, ssl = false) => new Promise((resolve, reject) => 
 	req.end();
 });
 
+/**
+ * @type {Object}
+ */
 const config = JSON.parse(fs.readFileSync(configPath, { encoding: 'utf8' }));
 
+/**
+ * @type {Object}
+ */
 let cache = fs.existsSync(cachePath) ?
 	JSON.parse(fs.readFileSync(cachePath, {encoding: 'utf8'})) : {};
+
+/**
+ * @type {Telegram|null}
+ */
+const telegramClient = config.telegram?.enabled ? new Telegram(config.telegram.token) : null;
 
 const transporter = nodemailer.createTransport({
 	host: config.mail.host || '',
@@ -117,7 +129,7 @@ async function run() {
 
 			products.forEach(y => {
 				if (y.price <= x.targetPrice && !cache[x.name].price.find(z => z.link === y.link && z.price === y.price))
-					promises.push(sendMail(y, x.name));
+					promises.push(sendNotification(y, x.name));
 			});
 			cache[x.name].price = products;
 		}
@@ -142,7 +154,7 @@ async function run() {
 
 			products.forEach(y => {
 				if (y.pricePerUnit <= x.targetUnitPrice && !cache[x.name].unit.find(z => z.link === y.link && z.pricePerUnit === y.pricePerUnit))
-					promises.push(sendMail(y, x.name));
+					promises.push(sendNotification(y, x.name));
 			});
 			cache[x.name].unit = products;
 		}
@@ -166,18 +178,39 @@ function resolveHTML(html) {
 	return products;
 }
 
-async function sendMail(product, name) {
-	console.log(`Sending mail(s) about product: '${product.name}' to [${config.recipients.join(', ')}]`);
-	await transporter.sendMail({
+function sendNotification(product, name) {
+	return Promise.all([
+		config.mail?.enabled ? sendMail(product, name) : null,
+		config.telegram?.enabled ? sendTelegram(product, name) : null
+	]);
+}
+
+function sendMail(product, name) {
+	console.log(`[Mail] Sending notification about product: '${product.name}' to [${config.mail.recipients.join(', ')}]`);
+	return transporter.sendMail({
 		from: '"Geizhals Crawler" <geizhals.crawler@gmail.com>',
 		to: config.recipients.join(','),
 		subject: 'New Deal found!',
-		html: fs.readFileSync('mail.html', {encoding: 'utf8'})
+		html: fs.readFileSync('mail.html', { encoding: 'utf8' })
 			.replace('%%search%%', name)
 			.replace('%%link%%', product.link)
 			.replace('%%name%%', product.name)
 			.replace('%%price%%', product.price)
 			.replace('%%pricePerUnit%%', product.pricePerUnit)
+	});
+}
+
+function sendTelegram(product, name) {
+	console.log(`[Telegram] Sending notification about product: '${product.name}'`);
+	return telegramClient.sendMessage(config.telegram.chatId, {
+		parse_mode: 'Markdown',
+		text: fs.readFileSync('message.md', { encoding: 'utf8' })
+			.replace('%%search%%', name)
+			.replace('%%link%%', product.link)
+			.replace('%%name%%', product.name)
+			.replace('%%price%%', product.price)
+			.replace('%%pricePerUnit%%', product.pricePerUnit)
+			.replace('-', '\\-')
 	});
 }
 

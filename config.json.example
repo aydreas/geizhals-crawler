@@ -1,14 +1,20 @@
 {
 	"mail": {
+	    "enabled": false,
 		"host": "smtp.gmail.com",
 		"port": 587,
 		"secure": false,
 		"user": "",
-		"pass": ""
+		"pass": "",
+		"recipients": [
+        	"mail@example.com"
+        ]
 	},
-	"recipients": [
-		"mail@example.com"
-	],
+	"telegram": {
+	    "enabled": true,
+	    "token": "",
+	    "channelId": ""
+	},
     "searches": [
 		{
     		"url": "https://geizhals.at/?cat=hde7s&xf=1654_heliumgef%FCllt~960_5&asuch=&bpmin=&bpmax=&v=e&hloc=at&hloc=de&hloc=pl&hloc=uk&hloc=eu&plz=&dist=&mail=&sort=r&bl1_id=30&togglecountry=set",

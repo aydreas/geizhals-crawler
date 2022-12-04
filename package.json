@@ -1,6 +1,6 @@
 {
   "name": "geizhals-crawler",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -10,7 +10,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "node-html-parser": "^1.2.16",
-    "nodemailer": "^6.4.6"
+    "node-html-parser": "^6.1.4",
+    "nodemailer": "^6.8.0",
+    "telegraf": "^4.11.2"
   }
 }
