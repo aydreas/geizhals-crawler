@@ -210,7 +210,6 @@ function sendTelegram(product, name) {
 			.replace('%%name%%', product.name)
 			.replace('%%price%%', product.price)
 			.replace('%%pricePerUnit%%', product.pricePerUnit)
-			.replace('-', '\\-')
 	});
 }
 
